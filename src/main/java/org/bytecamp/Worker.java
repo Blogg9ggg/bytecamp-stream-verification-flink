@@ -2,13 +2,6 @@ package org.bytecamp;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
-import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.api.common.serialization.SimpleStringSchema;
-import org.apache.flink.connector.base.DeliveryGuarantee;
-import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
-import org.apache.flink.connector.kafka.sink.KafkaSink;
-import org.apache.flink.connector.kafka.source.KafkaSource;
-import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
@@ -16,66 +9,17 @@ import org.apache.flink.streaming.api.windowing.assigners.SlidingEventTimeWindow
 import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.util.Collector;
-import org.bytecamp.common.Constant;
 
+import java.io.Serializable;
 import java.util.ArrayList;
-import java.util.HashMap;
+
+import static org.bytecamp.SomeUtils.*;
 
 
-public class Worker {
+public class Worker implements Serializable {
 
     private final String APP_NAME = "temp_name";
 
-    // first get special environment
-    private StreamExecutionEnvironment getEnvironment() {
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-
-        // ... set environment
-        env.setParallelism(1);
-
-        return env;
-    }
-
-    // get old topic sources
-    private DataStreamSource<String> getOldTopicSource(StreamExecutionEnvironment env) {
-        KafkaSource<String> source = getKafkaSource(Constant.Kafka.OLD_KAFKA_TOPIC);
-        return env.fromSource(source, WatermarkStrategy.noWatermarks(), APP_NAME);
-    }
-
-    // get new topic sources
-    private DataStreamSource<String> getNewTopicSource(StreamExecutionEnvironment env) {
-        KafkaSource<String> source = getKafkaSource(Constant.Kafka.NEW_KAFKA_TOPIC);
-        return env.fromSource(source, WatermarkStrategy.noWatermarks(), APP_NAME);
-    }
-
-    // get two topic sources
-    private DataStreamSource<String> getTwoTopicSource(StreamExecutionEnvironment env) {
-        KafkaSource<String> source = getKafkaSource(Constant.Kafka.NEW_KAFKA_TOPIC, Constant.Kafka.OLD_KAFKA_TOPIC);
-        return env.fromSource(source, WatermarkStrategy.noWatermarks(), APP_NAME);
-    }
-
-
-    // get kafka Source with the topicName
-    private KafkaSource<String> getKafkaSource(String... topicName) {
-        return KafkaSource.<String>builder()
-                .setBootstrapServers(Constant.Kafka.KAFKA_BROKER_ADDRESS)
-                .setTopics(topicName)
-                .setGroupId(Constant.Kafka.TEST_KAFKA_CONSUMER_PREFIX + this.getClass().getName())
-                .setStartingOffsets(OffsetsInitializer.earliest())
-                .setValueOnlyDeserializer(new SimpleStringSchema())
-                .build();
-    }
-
-    private KafkaSink<String> getKafkaSink(String topicName) {
-        return KafkaSink.<String>builder()
-                .setBootstrapServers(Constant.Kafka.KAFKA_BROKER_ADDRESS)
-                .setRecordSerializer(KafkaRecordSerializationSchema.builder()
-                        .setTopic(topicName)
-                        .setValueSerializationSchema(new SimpleStringSchema())
-                        .build()
-                )
-                .build();
-    }
 
     /**
      * verify function
@@ -123,20 +67,17 @@ public class Worker {
     }
 
     // main
-    public void start() {
+    public void start() throws Exception {
         StreamExecutionEnvironment env = getEnvironment();
-        DataStreamSource<String> DataSource = getTwoTopicSource(env);
-        if (Constant.Data.DATA_TYPE == Constant.Data.Types.JSON) {
-            DataSource.map(value -> {
-                        JSONObject jsonObject = JSON.parseObject(value);
-                        jsonObject.put(Constant.Data.TIMESTAMP_FIELD, System.currentTimeMillis());
-                        return jsonObject;
-                    })
+        DataStreamSource<JSONObject> DataSource = getTwoTopicSource(env,APP_NAME);
+        if (Constant.Data.DATA_TYPE.equals(Constant.Data.Types.JSON)) {
+            DataSource
                     .keyBy(e -> e.getString(Constant.Data.PRIMARY_KEY))
                     .window(SlidingEventTimeWindows.of(Time.minutes(6), Time.seconds(1)))
                     .process(new JsonWindowFunction())
                     .map(JSON::toString)
                     .sinkTo(getKafkaSink(Constant.Kafka.OUT_PUT_TOPIC));
         }
+        env.execute(APP_NAME);
     }
 }

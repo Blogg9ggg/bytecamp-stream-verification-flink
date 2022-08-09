@@ -1,4 +1,4 @@
-package org.bytecamp.common;
+package org.bytecamp;
 
 public class Constant {
     public static class Kafka {
@@ -17,6 +17,9 @@ public class Constant {
     }
 
     public static class Data{
+        public static final String TOPIC_NAME = "topic";
+
+
         public static class Types {
             public static final String JSON = "JSON";
             public static final String KV = "K:V";
